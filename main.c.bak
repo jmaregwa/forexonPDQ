@@ -1,0 +1,433 @@
+
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+
+#include "posapi.h"
+
+const APPINFO AppInfo={
+    "MagneticExtTest",
+    "1.0",
+    "Author: Ryan Huang",
+    "20130514",
+    "Magnetic Ext Test",
+    0
+};
+
+#ifndef     ON
+#define     ON                  1
+#endif
+
+#ifndef     OFF
+#define     OFF                 0
+#endif
+
+#define MANU_OPT_MAINB          0       //  主板测试
+#define MANU_OPT_PORTB          1       //  接口板测试
+#define MANU_OPT_MOD            2       //  模块入库检查,sam板
+#define MANU_OPT_FULL           4       //  整机测试
+#define MANU_OPT_MENU           5       //  单项测试
+#define MANU_OPT_INTERNAL       10      //  单项测试
+
+UINT32  bIsChnFont = 0;           		    // 当前是否使用中文字体
+UINT32  k_MenuLanguage = 1;                  //  当前的菜单语言为中文
+I32 CheckChn(U32 Mode)
+{
+    if ((0!=bIsChnFont) && (0!=(Mode&DISP_CFONT)) && (1==k_MenuLanguage))
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+void lcdDispMultiLang(I32 Col, I32 Line, U32 Mode, U08 *ch, U08 *en)
+{
+    if (CheckChn(Mode))
+    {
+        lcdDisplay(Col, Line, Mode, ch);
+    }
+    else
+    {
+        lcdDisplay(Col, Line, Mode, en);
+    }
+}
+
+void lcdDispMultiLangI1(I32 Col, I32 Line, U32 Mode, U08 *ch, U08 *en, I32 P1)
+{
+    if (CheckChn(Mode))
+    {
+        lcdDisplay(Col, Line, Mode, ch, P1);
+    }
+    else
+    {
+        lcdDisplay(Col, Line, Mode, en, P1);
+    }
+}
+
+#ifndef     ON
+#define     ON                  1
+#endif
+
+#ifndef     OFF
+#define     OFF                 0
+#endif
+
+UINT32  k_MagTestMode;
+void BeepErr(void)
+{
+    sysBeef(5, 1000);
+}
+
+void magTestMode(int32_t Mode)
+{
+    if(Mode==ON || Mode==OFF)
+    {
+        k_MagTestMode = Mode;
+        if(Mode == ON)
+        {
+            portOpen(PORT_COM1, "115200,8,n,1");
+        }
+    }
+}
+
+int TManuMagCard(int TestMode)
+{
+    int     iRet, i, j, k;
+	unsigned int    MagRet;
+    unsigned int    BeginTime, EndTime;
+	unsigned char     Track[3][1024], T2[100], byTemp;
+	int iTrack1Len, iTrack2Len, iTrack3Len;
+    int     ErrTime, AllTime, ContiOkTime, NeedOkTime;
+    int     CardMode;       //  0:正常卡(非整机测试用)，1:正常卡(整机测试)，2:上偏卡，3:下偏卡
+    int     ErrFlag;
+
+	magOpen();
+    if(TestMode == MANU_OPT_INTERNAL)
+    {
+        magTestMode(ON);
+    }
+
+    CardMode = 0;
+    NeedOkTime = 0;
+    if(TestMode == MANU_OPT_FULL)
+    {
+        CardMode = 1;
+        NeedOkTime = 5;
+    }
+    else if(TestMode == MANU_OPT_MAINB)
+    {
+        NeedOkTime = 5;
+    }
+    ErrTime = 0;
+    AllTime = 0;
+    ContiOkTime = 0;
+    kbFlush();
+	while(1)
+	{
+        while(magSwiped() == NO)
+        {
+            lcdCls();
+            lcdDispMultiLang(0, 0, DISP_CFONT|DISP_INVLINE|DISP_MEDIACY, "测试磁卡", "TEST MAGCARD");
+            switch(CardMode)
+            {
+            case 0:
+                lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "请刷卡<<<", "Swipe<<<");
+                break;
+            case 1:
+                lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "请刷常规卡<<<", "Regular Card<<<");
+                break;
+            case 2:
+                lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "请刷上偏卡<<<", "Up Bias Card<<<");
+                break;
+            case 3:
+                lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "请刷下偏卡<<<", "Down Bias Card<<");
+                break;
+            }
+            if(AllTime != 0)
+            {
+                lcdDisplay(0, 5, DISP_ASCII|DISP_CLRLINE, "Succeed: %d%%", (AllTime-ErrTime)*100/AllTime);
+            }
+            lcdDisplay(0, 6, DISP_ASCII|DISP_CLRLINE, "TOTAL:%d, ERR:%d", AllTime, ErrTime);
+            if(TestMode == MANU_OPT_MAINB || TestMode == MANU_OPT_FULL)
+            {
+                lcdDisplay(0, 7, DISP_ASCII|DISP_CLRLINE, "ContiOK:%d, Need:%d", ContiOkTime, NeedOkTime);
+            }
+            else
+            {
+                lcdDisplay(0, 7, DISP_ASCII|DISP_CLRLINE, "ContiOK: %d", ContiOkTime);
+            }
+
+            while(2)
+            {
+                if(magSwiped() == YES)
+                {
+                    break;
+                }
+                iRet = kbGetKeyMs(10);
+    			if(iRet == KEY_CANCEL)
+    			{
+                    if(TestMode == MANU_OPT_MAINB || TestMode == MANU_OPT_FULL)
+                    {
+                        lcdCls();
+                        lcdDispMultiLang(0, 0, DISP_CFONT|DISP_INVLINE|DISP_MEDIACY, "测试磁卡", "TEST MAGCARD");
+                        lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "未按要求完成", "Uncomplete");
+                        lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "强制退出?", "Quit Now?");
+                        kbFlush();
+                        if(kbGetKeyMs(5000) == KEY_ENTER)
+                        {
+        				    magClose();
+                            magTestMode(OFF);
+                            return(KB_CANCEL);
+                        }
+                    }
+                    else
+                    {
+    				    magClose();
+                        magTestMode(OFF);
+                        return(OK);
+                    }
+                    break;
+    			}
+            }
+        }
+
+        lcdCls();
+        lcdDispMultiLang(0, 0, DISP_CFONT|DISP_INVLINE|DISP_MEDIACY, "测试磁卡", "TEST MAGCARD");
+        lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "已刷卡", "Swipe OK");
+        lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "读取数据", "Reading...");
+		sysBeep();
+        memset(Track, 0x00, sizeof(Track));
+        iTrack1Len = 0;
+        iTrack2Len = 0;
+        iTrack3Len = 0;
+		MagRet = magReadExt(Track[0], &iTrack1Len, Track[1], &iTrack2Len, Track[2], &iTrack3Len);
+		
+		memset(T2, 0x00, sizeof(T2));
+		for (i=0; i<208; i++)
+		{
+			if (0 != Track[1][i+17])
+			{
+				T2[i>>3] |= (1<<(7-(i&0x07)));
+			}
+		}
+		
+        ErrFlag = OFF;
+//        lcdClrLine(2, 7);
+        lcdCls();
+        lcdDisplay(0,0,0x00, "MagRet=%d,1", MagRet);
+        lcdDisplay(0,1,0x00, "%d,%d,%d,", iTrack1Len, iTrack2Len, iTrack3Len);
+        lcdDisplay(0,2,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[0], T2[1], T2[2], T2[3], T2[4], T2[5], T2[6], T2[7]);
+        lcdDisplay(0,3,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[8], T2[9], T2[10], T2[11], T2[12], T2[13], T2[14], T2[15]);
+        lcdDisplay(0,4,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[16], T2[17], T2[18], T2[19], T2[20], T2[21], T2[22], T2[23]);
+        lcdDisplay(0,5,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[24], T2[25], T2[26], T2[27], T2[28], T2[29], T2[30], T2[31]);
+        lcdDisplay(0,6,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[32], T2[33], T2[34], T2[35], T2[36], T2[37], T2[38], T2[39]);
+        lcdDisplay(0,7,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[40], T2[41], T2[42], T2[43], T2[44], T2[45], T2[46], T2[47]);
+        kbGetKey();
+        lcdDisplay(0,0,0x00, "MagRet=%d,2", MagRet);
+        lcdDisplay(0,1,0x00, "%d,%d,%d,", iTrack1Len, iTrack2Len, iTrack3Len);
+        lcdDisplay(0,2,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[48], T2[49], T2[50], T2[51], T2[52], T2[53], T2[54], T2[55]);
+        lcdDisplay(0,3,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[56], T2[57], T2[58], T2[59], T2[60], T2[61], T2[62], T2[63]);
+        lcdDisplay(0,4,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[64], T2[65], T2[66], T2[67], T2[68], T2[69], T2[70], T2[71]);
+        lcdDisplay(0,5,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[72], T2[73], T2[74], T2[75], T2[76], T2[77], T2[78], T2[79]);
+        lcdDisplay(0,6,0x00, "%02x%02x%02x%02x%02x%02x%02x%02x", T2[80], T2[81], T2[82], T2[83], T2[84], T2[85], T2[86], T2[87]);
+        kbGetKey();
+        lcdCls();
+        if(MagRet & 0x01)
+        {
+            lcdDispMultiLangI1(0, 0, DISP_CFONT|DISP_CLRLINE, "一磁道正确: %d", "Track 1 OK: %d", strlen(Track[0]));
+        }
+        if(MagRet & 0x10)
+        {
+            lcdDispMultiLangI1(0, 0, DISP_CFONT|DISP_CLRLINE, "一磁道错: %d", "Track 1 ERR: %d", strlen(Track[0]));
+            ErrFlag = ON;
+        }
+        if(MagRet & 0x02)
+        {
+            lcdDispMultiLangI1(0, 2, DISP_CFONT|DISP_CLRLINE, "二磁道正确: %d", "Track 2 OK: %d", strlen(Track[1]));
+        }
+        if(MagRet & 0x20)
+        {
+            lcdDispMultiLangI1(0, 2, DISP_CFONT|DISP_CLRLINE, "二磁道错: %d", "Track 2 ERR: %d", strlen(Track[1]));
+            ErrFlag = ON;
+        }
+        if(MagRet & 0x04)
+        {
+            lcdDispMultiLangI1(0, 4, DISP_CFONT|DISP_CLRLINE, "三磁道正确: %d", "Track 3 OK: %d", strlen(Track[2]));
+        }
+        if(MagRet & 0x40)
+        {
+            lcdDispMultiLangI1(0, 4, DISP_CFONT|DISP_CLRLINE, "三磁道错: %d", "Track 3 ERR: %d", strlen(Track[2]));
+            ErrFlag = ON;
+        }
+        AllTime++;
+        if(ErrFlag == ON)
+        {
+            ContiOkTime = 0;
+            ErrTime++;
+            BeepErr();
+        }
+        else
+        {
+			if (TestMode == MANU_OPT_FULL && (MagRet & 0x77) != 0x07) {
+				if (! (MagRet & 0x01) )
+					lcdDispMultiLang(0, 0, DISP_CFONT|DISP_CLRLINE, "一磁道: 无数据", "Track 1: NO DATA");
+				if (! (MagRet & 0x02) )
+					lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "二磁道: 无数据", "Track 2: NO DATA");
+				if (! (MagRet & 0x04) )
+					lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "三磁道: 无数据", "Track 3: NO DATA");
+				ContiOkTime = 0;
+				ErrFlag = ON;
+				BeepErr();
+			} else {
+	            ContiOkTime++;
+			}
+        }
+
+        lcdDisplay(0, 6, DISP_ASCII|DISP_CLRLINE, "TOTAL:%d, ERR:%d", AllTime, ErrTime);
+        if(TestMode == MANU_OPT_MAINB || TestMode == MANU_OPT_FULL)
+        {
+            lcdDisplay(0, 7, DISP_ASCII|DISP_CLRLINE, "ContiOK:%d, Need:%d", ContiOkTime, NeedOkTime);
+        }
+        else
+        {
+            lcdDisplay(0, 7, DISP_ASCII|DISP_CLRLINE, "ContiOK: %d", ContiOkTime);
+        }
+
+        if((ContiOkTime >= NeedOkTime) && (TestMode == MANU_OPT_MAINB))
+        {
+            sysBeep();
+			magClose();
+            magTestMode(OFF);
+            return(OK);
+        }
+        else if((ContiOkTime >= NeedOkTime) && (TestMode == MANU_OPT_FULL))
+        {
+            sysBeep();
+            CardMode++;
+            ErrTime = 0;
+            AllTime = 0;
+            ContiOkTime = 0;
+            if(CardMode > 3)
+            {
+    			magClose();
+                magTestMode(OFF);
+                return(OK);
+            }
+            else
+            {
+                sysBeep();
+                lcdCls();
+                lcdDispMultiLang(0, 0, DISP_CFONT|DISP_INVLINE|DISP_MEDIACY, "测试磁卡", "TEST MAGCARD");
+                switch(CardMode)
+                {
+                case 2:
+                    lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "测试上偏卡", "Test UpBias Card");
+                    lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "确认-开始", "ENTER - Begin");
+                    break;
+                case 3:
+                    lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "测试下偏卡", "TestDownBiasCard");
+                    lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "确认-开始", "ENTER - Begin");
+                    break;
+                }
+                kbFlush();
+                while(kbGetKey() != KEY_ENTER);
+                magReset();
+            }
+            continue;
+        }
+
+        BeginTime = sysGetTimerCount();
+		while(3)
+		{
+            EndTime = sysGetTimerCount();
+            if(EndTime-BeginTime > 10000)
+            {
+                break;
+            }
+			if(magSwiped() == YES)
+			{
+				break;
+			}
+			if(kbhit() == YES)
+			{
+                iRet = kbGetKey();
+                if(iRet == KEY_CANCEL)
+                {
+                    if(TestMode == MANU_OPT_MAINB || TestMode == MANU_OPT_FULL)
+                    {
+                        lcdCls();
+                        lcdDispMultiLang(0, 0, DISP_CFONT|DISP_INVLINE|DISP_MEDIACY, "测试磁卡", "TEST MAGCARD");
+                        lcdDispMultiLang(0, 2, DISP_CFONT|DISP_CLRLINE, "未按要求完成", "Uncomplete");
+                        lcdDispMultiLang(0, 4, DISP_CFONT|DISP_CLRLINE, "强制退出?", "Quit Now?");
+                        kbFlush();
+                        if(kbGetKeyMs(5000) == KEY_ENTER)
+                        {
+        				    magClose();
+                            magTestMode(OFF);
+                            return(KB_CANCEL);
+                        }
+                    }
+                    else
+                    {
+    				    magClose();
+                        magTestMode(OFF);
+                        return(OK);
+                    }
+                }
+                if(iRet == KEY_FN)
+                {
+                    for(i=0; i<3; i++)
+                    {
+                        lcdCls();
+                        if(MagRet & (0x01<<i))
+                        {
+                            lcdDisplay(0, 0, DISP_CFONT|DISP_CLRLINE, "Track %d OK: %d", i+1, strlen(Track[i]));
+                        }
+                        else if(MagRet & (0x10<<i))
+                        {
+                            lcdDisplay(0, 0, DISP_CFONT|DISP_CLRLINE, "Track %d ERR: %d", i+1, strlen(Track[i]));
+                        }
+                        else
+                        {
+                            lcdDisplay(0, 0, DISP_CFONT|DISP_CLRLINE, "Track %d NULL", i+1);
+                        }
+                        lcdDisplay(0, 2, DISP_ASCII|DISP_CLRLINE, "%s", Track[i]);
+                		while(4)
+                		{
+                			if(magSwiped() == YES)
+                			{
+                				break;
+                			}
+                			if(kbhit() == YES)
+                			{
+                                iRet = kbGetKey();
+                                break;
+                			}
+                		}
+            			if((magSwiped() == YES) || (iRet == KEY_CANCEL))
+            			{
+            				break;
+            			}
+                    }
+                }
+                break;
+			}
+		}
+	}// 1
+}
+
+
+int main(int argc, char *argv[])
+{
+	TManuMagCard(MANU_OPT_INTERNAL);
+    kbGetKey();
+    return 0;
+}
+
+
+
+
+
